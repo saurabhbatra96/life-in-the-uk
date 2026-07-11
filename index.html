@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Life in the UK — Study App</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>🇬🇧 Life in the UK</h1>
+  <p class="subtitle">Summaries &amp; flashcards from the official handbook, 3rd Edition</p>
+  <nav id="tabs">
+    <button class="tab active" data-tab="summary">📖 Summaries</button>
+    <button class="tab" data-tab="cards">🃏 Flashcards</button>
+    <button class="tab" data-tab="checklist">✅ Checklists</button>
+    <button class="tab" data-tab="stats">📊 Progress</button>
+  </nav>
+</header>
+
+<main>
+  <!-- SUMMARIES -->
+  <section id="tab-summary" class="tab-panel active">
+    <aside id="summary-nav"></aside>
+    <article id="summary-content">
+      <p class="hint">Select a chapter section on the left to read its summary.</p>
+    </article>
+  </section>
+
+  <!-- FLASHCARDS -->
+  <section id="tab-cards" class="tab-panel">
+    <div id="card-controls">
+      <div class="control-row" id="chapter-filters"></div>
+      <div class="control-row">
+        <label><input type="checkbox" id="only-unknown"> Only cards I don't know yet</label>
+        <button id="shuffle-btn">🔀 Shuffle</button>
+        <button id="reset-deck-btn" class="danger">Reset progress for current filter</button>
+      </div>
+    </div>
+    <div id="card-area">
+      <div id="card-progress"></div>
+      <div id="flashcard" tabindex="0" aria-live="polite">
+        <div id="card-face"></div>
+        <div id="card-meta"></div>
+      </div>
+      <div id="card-actions">
+        <button id="flip-btn">Flip (Space)</button>
+      </div>
+      <div id="grade-actions" class="hidden">
+        <button id="dont-know-btn" class="danger">✗ Still learning (1)</button>
+        <button id="know-btn" class="success">✓ I know this (2)</button>
+      </div>
+      <div id="nav-actions">
+        <button id="prev-btn">← Prev</button>
+        <button id="next-btn">Next →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHECKLISTS -->
+  <section id="tab-checklist" class="tab-panel">
+    <p class="hint">These are the handbook's own <strong>“Check that you understand”</strong> boxes — the book's guidance on what you must be able to explain. Tick items only when you could answer questions on them without looking. The book warns these alone are not enough: study all summaries too.</p>
+    <div id="checklist-content"></div>
+  </section>
+
+  <!-- STATS -->
+  <section id="tab-stats" class="tab-panel">
+    <div id="stats-content"></div>
+  </section>
+</main>
+
+<footer>
+  <p>Content sourced from <em>Life in the United Kingdom: A guide for new residents, 3rd Edition</em> (Crown copyright). Page numbers refer to the PDF edition. The real test has 24 questions drawn from the whole book — pass mark 75%.</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
