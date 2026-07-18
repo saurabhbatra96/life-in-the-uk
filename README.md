@@ -9,6 +9,7 @@ Open `index.html` in any browser — no install, no server, works offline. Progr
 - **📖 Summaries** — every section of all 5 chapters, condensed. Read these first.
 - **🃏 Flashcards** — 854 cards, each tagged with its source page in the PDF. Flip with **Space**, navigate with **←/→**, grade with **1** (still learning) / **2** (know it). Filter by chapter, or tick "only cards I don't know" for revision loops.
 - **✅ Checklists** — the book's own "Check that you understand" boxes. The book warns these alone aren't enough to pass; they're the floor, not the ceiling.
+- **⏳ Timeline** — every dated fact from the flashcards laid out as a vertical timeline, from 55 BC to the present, grouped by century. Built automatically from the cards (years, decades like "1920s", and "18th century"-style dates), so a card appears under each date it mentions. Ideal for chapter 3, where the book says to know *all dates*.
 - **📊 Progress** — per-chapter mastery. The real test: 24 questions from anywhere in the book, 75% to pass.
 
 ## What the book itself says to focus on (built into the card selection)

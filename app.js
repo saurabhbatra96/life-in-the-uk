@@ -281,6 +281,74 @@
     });
   }
 
+  // ---------- timeline ----------
+  function ordinal(n) {
+    const s = ["th", "st", "nd", "rd"], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  // Pull every date mention out of a card's text. Bare 3-digit numbers are
+  // skipped (feet, miles, "999") — small years must carry an explicit AD/BC.
+  function extractDates(text) {
+    const found = new Map(); // label -> sort key
+    const add = (key, label) => { if (!found.has(label)) found.set(label, key); };
+    let m;
+    const bc = /\b(\d{1,4})\s*BC\b/g;
+    while ((m = bc.exec(text))) add(-m[1], m[1] + " BC");
+    const adPrefix = /\bAD\s*(\d{1,4})\b/g;
+    while ((m = adPrefix.exec(text))) add(+m[1], "AD " + m[1]);
+    const adSuffix = /\b(?:(\d{1,4})[–-])?(\d{1,4})\s*AD\b/g;
+    while ((m = adSuffix.exec(text))) {
+      if (m[1]) add(+m[1], "AD " + m[1]);
+      add(+m[2], "AD " + m[2]);
+    }
+    const year = /\b(1[0-9]{3}|20[0-2][0-9])\b/g;
+    while ((m = year.exec(text))) add(+m[1], m[1]);
+    const decade = /\b([12]\d{2}0)s\b/g;
+    while ((m = decade.exec(text))) add(+m[1] + 0.4, m[1] + "s");
+    const century = /\b(\d{1,2})(?:st|nd|rd|th)(?=(?:\s+and\s+\d{1,2}(?:st|nd|rd|th))?[- ]centur)/gi;
+    while ((m = century.exec(text))) add((m[1] - 1) * 100 + 0.6, ordinal(+m[1]) + " century");
+    return found;
+  }
+
+  const TIMELINE = (() => {
+    const groups = new Map(); // label -> {key, label, events}
+    ALL_CARDS.forEach(card => {
+      extractDates(card.q + " " + card.a).forEach((key, label) => {
+        let g = groups.get(label);
+        if (!g) groups.set(label, g = { key, label, events: [] });
+        g.events.push(card);
+      });
+    });
+    return [...groups.values()].sort((a, b) => a.key - b.key);
+  })();
+
+  function eraOf(key) {
+    if (key < 0) return "Before AD 1";
+    if (key < 1000) return "AD 1–999";
+    return Math.floor(key / 100) * 100 + "s";
+  }
+
+  function renderTimeline() {
+    const wrap = document.getElementById("timeline-content");
+    const nEvents = TIMELINE.reduce((n, g) => n + g.events.length, 0);
+    let html = `<p class="hint">Every dated fact from the flashcards — <strong>${nEvents}</strong> facts across <strong>${TIMELINE.length}</strong> dates, oldest first. A card appears under each date it mentions.</p>`;
+    let era = null;
+    html += `<div class="timeline">`;
+    TIMELINE.forEach(g => {
+      const e = eraOf(g.key);
+      if (e !== era) { era = e; html += `<div class="tl-era">${esc(e)}</div>`; }
+      html += `<div class="tl-group"><div class="tl-year">${esc(g.label)}</div>`;
+      g.events.forEach(card => {
+        const chap = card._chapter <= 5 ? "Ch " + card._chapter : "⭐ Key facts";
+        html += `<div class="tl-event"><div class="tl-q">${inlineMd(card.q)}</div><div class="tl-a">${inlineMd(card.a)}</div><div class="tl-meta">${chap} · §${esc(String(card.section))} · p.${card.page}</div></div>`;
+      });
+      html += `</div>`;
+    });
+    html += `</div>`;
+    wrap.innerHTML = html;
+  }
+
   // ---------- stats ----------
   function renderStats() {
     const wrap = document.getElementById("stats-content");
@@ -306,6 +374,7 @@
   renderSummaryNav();
   renderChapterFilters();
   renderChecklists();
+  renderTimeline();
   rebuildDeck();
   // auto-open first section
   const firstBtn = document.querySelector("#summary-nav button");

@@ -184,6 +184,56 @@ button:hover { filter: brightness(0.96); }
 .check-group input { margin-top: 0.3rem; }
 .check-group label.done { color: var(--muted); text-decoration: line-through; }
 
+/* Timeline */
+#timeline-content { max-width: 760px; margin: 0 auto; }
+.tl-era {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  color: var(--red);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.5rem 0 0.4rem;
+  margin-top: 0.8rem;
+}
+.tl-group {
+  position: relative;
+  border-left: 3px solid var(--border);
+  margin-left: 0.45rem;
+  padding: 0 0 1.1rem 1.4rem;
+}
+.tl-group::before {
+  content: "";
+  position: absolute;
+  left: -8.5px;
+  top: 0.3rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 3px solid var(--bg);
+}
+.tl-year {
+  font-weight: 800;
+  color: var(--navy);
+  font-size: 1.05rem;
+  margin-bottom: 0.4rem;
+}
+.tl-event {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+.tl-q { color: var(--muted); }
+.tl-a { margin-top: 0.15rem; }
+.tl-meta { font-size: 0.72rem; color: var(--muted); margin-top: 0.3rem; }
+
 /* Stats */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.9rem; }
 .stat-card {
