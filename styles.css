@@ -162,6 +162,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
 #quiz-feedback { margin-top: 0.4rem; font-weight: 600; }
 #quiz-feedback.good { color: var(--green); }
 #quiz-feedback.bad { color: var(--red); }
+#quiz-explain {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  background: #f2f5f9;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
 #card-meta {
   font-size: 0.75rem;
   color: var(--muted);

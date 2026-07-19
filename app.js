@@ -181,45 +181,247 @@
   }
 
   // ----- MCQ option generation -----
+  // Distractor styles modelled on the real Life in the UK test:
+  //  - date questions use nearby years clustered around the true date
+  //  - number questions use plausible alternative values, same units
+  //  - yes/no questions become two-option true/false style
+  //  - everything else samples same-category answers from other cards
   function normAns(s) {
     return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   }
 
-  // 3 distractors drawn from other cards' answers, preferring plausible ones:
-  // shared tags, same section/chapter, similar answer length.
-  function buildOptions(card) {
-    const correctNorm = normAns(card.a);
-    const tags = new Set(card.tags || []);
-    const cands = [];
-    for (const c of ALL_CARDS) {
-      if (c === card) continue;
-      const n = normAns(c.a);
-      if (n === correctNorm) continue;
-      let score = 0;
-      (c.tags || []).forEach(t => { if (tags.has(t)) score += 2; });
-      if (c.section === card.section) score += 2;
-      else if (c._chapter === card._chapter) score += 1;
-      const ratio = c.a.length / Math.max(card.a.length, 1);
-      if (ratio > 0.45 && ratio < 2.2) score += 1.5;
-      cands.push({ c, n, score: score + Math.random() * 2 });
+  function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+
+  // Nearby years, mixing close misses with wider ones (the real test shows
+  // e.g. 1388 / 1455 / 1462 / 1478). Never in the future for past events.
+  function yearAlternatives(y, count) {
+    const out = new Set();
+    let guard = 0;
+    while (out.size < count && guard++ < 300) {
+      const offsets = [randInt(1, 4), randInt(5, 15), randInt(20, 70), 10 * randInt(1, 9)];
+      let cand = y + (Math.random() < 0.5 ? -1 : 1) * offsets[randInt(0, 3)];
+      if (cand > 2025 && y <= 2025) cand = y - (cand - y);
+      if (cand > 0 && cand !== y) out.add(cand);
     }
-    cands.sort((a, b) => b.score - a.score);
+    return [...out];
+  }
+
+  function decadeAlternatives(y, count) {
+    const out = new Set();
+    let guard = 0;
+    while (out.size < count && guard++ < 300) {
+      let cand = y + (Math.random() < 0.5 ? -1 : 1) * 10 * randInt(1, 7);
+      if (cand > 2020 && y <= 2020) cand = y - (cand - y);
+      if (cand > 0 && cand !== y) out.add(cand);
+    }
+    return [...out];
+  }
+
+  function numberAlternatives(n, count) {
+    if (n >= 1000 && n <= 2029) return yearAlternatives(n, count);
+    const out = new Set();
+    let guard = 0;
+    while (out.size < count && guard++ < 300) {
+      let cand;
+      if (n <= 12) {
+        cand = n + (Math.random() < 0.5 ? -1 : 1) * randInt(1, 4);
+      } else {
+        const deltas = [randInt(1, 3), Math.round(n * 0.1), Math.round(n * 0.25), Math.round(n * 0.5)].filter(d => d > 0);
+        cand = n + (Math.random() < 0.5 ? -1 : 1) * deltas[randInt(0, deltas.length - 1)];
+      }
+      if (cand > 0 && cand !== n) out.add(cand);
+    }
+    return [...out];
+  }
+
+  function formatLike(origStr, n) {
+    return /\d,\d/.test(origStr) ? n.toLocaleString("en-US") : String(n);
+  }
+
+  function firstNumber(s) {
+    const m = s.match(/\d[\d,]*/);
+    return m ? parseInt(m[0].replace(/,/g, ""), 10) : NaN;
+  }
+
+  // "Who" answers are either a named individual ("Dylan Thomas, a Welsh
+  // poet…") or a group ("Knights and wealthy people…"). Mixing the two
+  // makes the odd shape a giveaway, so distractors must match.
+  function whoShape(s) {
+    const t = s.trim();
+    if (/^(sir|dame|lord|lady|st\.?|saint|king|queen|prince|princess|admiral|general|dr)\b/i.test(t)) return "single";
+    // Look for a plural noun in the opening words ("Protestant refugees…").
+    // Capitalised words mid-sentence are proper nouns ("Her cousin James VI"),
+    // and a leading name pair ("James Goodfellow") is skipped too — unless a
+    // lowercase plural follows it ("French Protestant refugees").
+    const notPlural = new Set(["was", "is", "his", "this", "its", "as", "has", "across", "perhaps", "whilst", "against", "various", "famous", "religious", "numerous", "previous", "times"]);
+    const isPlural = w => {
+      const x = w.toLowerCase().replace(/[^a-z']/g, "");
+      return /^(people|women|men|children)$/.test(x) ||
+        (x.length > 3 && x.endsWith("s") && !x.endsWith("ss") && !notPlural.has(x));
+    };
+    const capcap = /^[A-Z][a-z]*\.?\s+(?:[A-Z]|d'|O')/.test(t);
+    const tokens = t.replace(/^the\s+/i, "").split(/[\s,;—()]+/).slice(0, 4);
+    for (let i = 0; i < tokens.length; i++) {
+      if (/^[A-Z0-9]/.test(tokens[i]) && (i > 0 || capcap)) continue;
+      if (isPlural(tokens[i])) return "group";
+    }
+    return "single";
+  }
+
+  // Interrogative category of a question — used to match distractor shape
+  function qWord(q) {
+    const s = q.trim().toLowerCase();
+    if (/^(when\b|in (what|which) year|what year|for how long|how long|how many|how much|how old|what percentage|what proportion)/.test(s)) {
+      return /^when\b|year/.test(s.slice(0, 16)) ? "when" : "amount";
+    }
+    if (/^who\b/.test(s)) return "who";
+    if (/^where\b/.test(s)) return "where";
+    return null;
+  }
+
+  function buildOptions(card) {
+    const a = card.a.trim();
+
+    // Yes/no → true/false style, full answer becomes the explanation
+    const yn = a.match(/^(yes|no)\b/i);
+    if (yn) {
+      const isYes = yn[1].toLowerCase() === "yes";
+      const bare = normAns(a) === (isYes ? "yes" : "no");
+      return {
+        options: [{ text: "Yes", correct: isYes }, { text: "No", correct: !isYes }],
+        explanation: bare ? null : a
+      };
+    }
+
+    // Date followed by an explanation ("From 1979 to 1990 — the longest-serving…"):
+    // options are the date part with shifted years; full answer shown after
+    let m = a.match(/^((?:from|in|around|about|c\.)?\s*\d{3,4}(?:\s*(?:to|until|[–—-])\s*\d{2,4})?)\s*[—–]\s*.+$/i);
+    if (m) {
+      const lead = m[1].trim();
+      const base = firstNumber(lead);
+      const opts = [{ text: lead, correct: true }];
+      yearAlternatives(base, 3).forEach(y2 => {
+        const d = y2 - base;
+        opts.push({ text: lead.replace(/\d{2,4}/g, s => String(+s + d)), correct: false });
+      });
+      opts.sort((x, y) => firstNumber(x.text) - firstNumber(y.text));
+      return { options: opts, explanation: a };
+    }
+
+    // Year range ("1455–1485"): shift the whole range, keep the span
+    m = a.match(/^(\d{3,4})(\s*[–-]\s*)(\d{2,4})(\.?)$/);
+    if (m) {
+      const start = +m[1];
+      const endFull = m[3].length < 3 ? +m[1].slice(0, m[1].length - m[3].length) * Math.pow(10, m[3].length) + +m[3] : +m[3];
+      const span = endFull - start;
+      const opts = [{ text: a, correct: true }];
+      yearAlternatives(start, 3).forEach(s2 => {
+        const e2 = s2 + span;
+        const suffix = m[3].length < 3 && String(e2).length === String(s2).length && String(e2).slice(0, -m[3].length) === String(s2).slice(0, -m[3].length)
+          ? String(e2).slice(-m[3].length) : String(e2);
+        opts.push({ text: s2 + m[2] + suffix + m[4], correct: false });
+      });
+      opts.sort((x, y) => firstNumber(x.text) - firstNumber(y.text));
+      return { options: opts, explanation: null };
+    }
+
+    // Short answer containing exactly one number: perturb it in place,
+    // keeping the surrounding words ("Every 5 years" → "Every 3 years")
+    const nums = a.length <= 45 ? a.match(/\d+(?:,\d{3})*/g) : null;
+    if (nums && nums.length === 1) {
+      const numStr = nums[0];
+      const n = parseInt(numStr.replace(/,/g, ""), 10);
+      const idx = a.indexOf(numStr);
+      const after = a.slice(idx + numStr.length);
+      const isDecade = after[0] === "s";
+      const ordSuffix = (after.match(/^(st|nd|rd|th)\b/) || [])[1];
+      const alts = isDecade ? decadeAlternatives(n, 3) : numberAlternatives(n, 3);
+      const opts = [{ text: a, correct: true }];
+      alts.forEach(v => {
+        const text = ordSuffix
+          ? a.replace(numStr + ordSuffix, ordinal(v))
+          : a.replace(numStr, formatLike(numStr, v));
+        opts.push({ text, correct: false });
+      });
+      opts.sort((x, y) => firstNumber(x.text) - firstNumber(y.text));
+      return { options: opts, explanation: null };
+    }
+
+    const qt = qWord(card.q);
+
+    // Amount answers written as words ("Three times. He is a Scottish…"):
+    // perturb the word-number, trim to the first clause, explain after
+    const WORD_NUMS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    m = qt === "amount" ? a.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i) : null;
+    if (m) {
+      const n = WORD_NUMS.indexOf(m[1].toLowerCase()) + 1;
+      const lead = a.match(/^[^,.;—]+/)[0].trim();
+      const cap = w => w[0].toUpperCase() + w.slice(1);
+      // "One times"/"One Oscars" is ungrammatical — floor at 2 before a plural
+      const nextWord = (lead.slice(m[1].length).trim().match(/^\w+/) || [""])[0];
+      const minVal = /s$/i.test(nextWord) ? 2 : 1;
+      const opts = [{ text: lead + ".", correct: true, v: n }];
+      const seen = new Set([n]);
+      let guard = 0;
+      while (opts.length < 4 && guard++ < 100) {
+        const n2 = Math.min(12, Math.max(minVal, n + (Math.random() < 0.5 ? -1 : 1) * randInt(1, 4)));
+        if (seen.has(n2)) continue;
+        seen.add(n2);
+        opts.push({ text: lead.replace(m[1], cap(WORD_NUMS[n2 - 1])) + ".", correct: false, v: n2 });
+      }
+      opts.sort((x, y) => x.v - y.v);
+      return { options: opts, explanation: lead.length + 1 < a.length ? a : null };
+    }
+
+    // Corpus sampling: same-category answers from other cards, preferring
+    // shared tags, same section/chapter, similar length and — crucially —
+    // the same question shape (a "when/how many" question whose answer has
+    // numbers only gets distractors containing numbers; "who" prefers
+    // other "who" answers)
+    const correctNorm = normAns(a);
+    const tags = new Set(card.tags || []);
+    const needsDigit = (qt === "when" || qt === "amount") && /\d/.test(a);
+    const whoNeed = qt === "who" ? whoShape(a) : null;
+    const collect = strict => {
+      const list = [];
+      for (const c of ALL_CARDS) {
+        if (c === card) continue;
+        const norm = normAns(c.a);
+        if (norm === correctNorm) continue;
+        if (strict && needsDigit && !/\d/.test(c.a)) continue;
+        if (strict && whoNeed && whoShape(c.a) !== whoNeed) continue;
+        let score = 0;
+        (c.tags || []).forEach(t => { if (tags.has(t)) score += 2; });
+        if (c.section === card.section) score += 2;
+        else if (c._chapter === card._chapter) score += 1;
+        if (qt && qWord(c.q) === qt) score += 3;
+        const ratio = c.a.length / Math.max(a.length, 1);
+        if (ratio > 0.45 && ratio < 2.2) score += 1.5;
+        if (ratio > 0.7 && ratio < 1.4) score += 1;
+        list.push({ c, norm, score: score + Math.random() * 2 });
+      }
+      return list;
+    };
+    let cands = collect(true);
+    if (cands.length < 6) cands = collect(false);
+    cands.sort((x, y) => y.score - x.score);
     const opts = [{ text: card.a, correct: true }];
     const used = new Set([correctNorm]);
     for (const k of cands) {
       if (opts.length >= 4) break;
-      if (used.has(k.n)) continue;
-      used.add(k.n);
+      if (used.has(k.norm)) continue;
+      used.add(k.norm);
       opts.push({ text: k.c.a, correct: false });
     }
     shuffle(opts);
-    return opts;
+    return { options: opts, explanation: null };
   }
 
   function presentCard() {
     if (!deck.length) { current = null; renderQuiz(); return; }
     const card = deck[deckPos];
-    current = { card, options: buildOptions(card), answered: null };
+    const built = buildOptions(card);
+    current = { card, options: built.options, explanation: built.explanation, answered: null };
     renderQuiz();
   }
 
@@ -265,14 +467,22 @@
       optsEl.appendChild(b);
     });
 
+    const expEl = document.getElementById("quiz-explain");
     if (answered) {
       const gotIt = current.options[current.answered].correct;
       fbEl.textContent = gotIt ? "✓ Correct!" : "✗ Not quite — the correct answer is highlighted.";
       fbEl.className = gotIt ? "good" : "bad";
       cardEl.classList.toggle("right", gotIt);
       cardEl.classList.toggle("wrong", !gotIt);
+      if (current.explanation) {
+        expEl.innerHTML = inlineMd(current.explanation);
+        expEl.classList.remove("hidden");
+      } else {
+        expEl.classList.add("hidden");
+      }
     } else {
       fbEl.className = "hidden";
+      expEl.classList.add("hidden");
       cardEl.classList.remove("right", "wrong");
     }
 
