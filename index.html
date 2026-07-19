@@ -9,10 +9,10 @@
 <body>
 <header>
   <h1>🇬🇧 Life in the UK</h1>
-  <p class="subtitle">Summaries &amp; flashcards from the official handbook, 3rd Edition</p>
+  <p class="subtitle">Summaries &amp; practice questions from the official handbook, 3rd Edition</p>
   <nav id="tabs">
     <button class="tab active" data-tab="summary">📖 Summaries</button>
-    <button class="tab" data-tab="cards">🃏 Flashcards</button>
+    <button class="tab" data-tab="cards">🃏 Quiz</button>
     <button class="tab" data-tab="checklist">✅ Checklists</button>
     <button class="tab" data-tab="timeline">⏳ Timeline</button>
     <button class="tab" data-tab="stats">📊 Progress</button>
@@ -28,28 +28,23 @@
     </article>
   </section>
 
-  <!-- FLASHCARDS -->
+  <!-- QUIZ -->
   <section id="tab-cards" class="tab-panel">
     <div id="card-controls">
       <div class="control-row" id="chapter-filters"></div>
       <div class="control-row">
-        <label><input type="checkbox" id="only-unknown"> Only cards I don't know yet</label>
+        <label><input type="checkbox" id="only-wrong"> Only questions I got wrong</label>
         <button id="shuffle-btn">🔀 Shuffle</button>
         <button id="reset-deck-btn" class="danger">Reset progress for current filter</button>
       </div>
     </div>
     <div id="card-area">
       <div id="card-progress"></div>
-      <div id="flashcard" tabindex="0" aria-live="polite">
-        <div id="card-face"></div>
+      <div id="quiz-card" aria-live="polite">
+        <div id="quiz-question"></div>
+        <div id="quiz-options"></div>
+        <div id="quiz-feedback" class="hidden"></div>
         <div id="card-meta"></div>
-      </div>
-      <div id="card-actions">
-        <button id="flip-btn">Flip (Space)</button>
-      </div>
-      <div id="grade-actions" class="hidden">
-        <button id="dont-know-btn" class="danger">✗ Still learning (1)</button>
-        <button id="know-btn" class="success">✓ I know this (2)</button>
       </div>
       <div id="nav-actions">
         <button id="prev-btn">← Prev</button>

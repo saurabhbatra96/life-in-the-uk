@@ -9,12 +9,22 @@
   let store = loadStore();
   let deck = [];          // filtered+ordered card list
   let deckPos = 0;
-  let showingAnswer = false;
+  let current = null;     // { card, options: [{text, correct}], answered: index|null }
+  let sessionRight = 0, sessionWrong = 0;
   let activeChapters = new Set(DATA.map(c => c.chapter));
 
   function loadStore() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY)) || { cards: {}, checks: {} }; }
-    catch { return { cards: {}, checks: {} }; }
+    let s;
+    try { s = JSON.parse(localStorage.getItem(LS_KEY)) || {}; }
+    catch { s = {}; }
+    // migrate old flip-card marks ("know"/"learning") to quiz records
+    const cards = {};
+    for (const [id, v] of Object.entries(s.cards || {})) {
+      if (v === "know") cards[id] = { c: 1, w: 0, last: "c" };
+      else if (v === "learning") cards[id] = { c: 0, w: 1, last: "w" };
+      else if (v && typeof v === "object") cards[id] = v;
+    }
+    return { cards, checks: s.checks || {} };
   }
   function saveStore() { localStorage.setItem(LS_KEY, JSON.stringify(store)); }
 
@@ -110,7 +120,7 @@
         `</ul></div>`;
     }
     const nCards = ALL_CARDS.filter(c => c.section === sec.id).length;
-    if (nCards) html += `<p class="page-ref">${nCards} flashcards cover this section — practice them in the Flashcards tab.</p>`;
+    if (nCards) html += `<p class="page-ref">${nCards} questions cover this section — practice them in the Quiz tab.</p>`;
     el.innerHTML = html;
     if (el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -153,13 +163,14 @@
   }
 
   function rebuildDeck(keepOrder) {
-    const onlyUnknown = document.getElementById("only-unknown").checked;
+    const onlyWrong = document.getElementById("only-wrong").checked;
     deck = ALL_CARDS.filter(c => activeChapters.has(c._chapter));
-    if (onlyUnknown) deck = deck.filter(c => store.cards[c._id] !== "know");
+    if (onlyWrong) deck = deck.filter(c => (store.cards[c._id] || {}).last === "w");
     if (!keepOrder) shuffle(deck);
     deckPos = 0;
-    showingAnswer = false;
-    renderCard();
+    sessionRight = 0;
+    sessionWrong = 0;
+    presentCard();
   }
 
   function shuffle(arr) {
@@ -169,71 +180,145 @@
     }
   }
 
-  function renderCard() {
-    const face = document.getElementById("card-face");
+  // ----- MCQ option generation -----
+  function normAns(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  // 3 distractors drawn from other cards' answers, preferring plausible ones:
+  // shared tags, same section/chapter, similar answer length.
+  function buildOptions(card) {
+    const correctNorm = normAns(card.a);
+    const tags = new Set(card.tags || []);
+    const cands = [];
+    for (const c of ALL_CARDS) {
+      if (c === card) continue;
+      const n = normAns(c.a);
+      if (n === correctNorm) continue;
+      let score = 0;
+      (c.tags || []).forEach(t => { if (tags.has(t)) score += 2; });
+      if (c.section === card.section) score += 2;
+      else if (c._chapter === card._chapter) score += 1;
+      const ratio = c.a.length / Math.max(card.a.length, 1);
+      if (ratio > 0.45 && ratio < 2.2) score += 1.5;
+      cands.push({ c, n, score: score + Math.random() * 2 });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    const opts = [{ text: card.a, correct: true }];
+    const used = new Set([correctNorm]);
+    for (const k of cands) {
+      if (opts.length >= 4) break;
+      if (used.has(k.n)) continue;
+      used.add(k.n);
+      opts.push({ text: k.c.a, correct: false });
+    }
+    shuffle(opts);
+    return opts;
+  }
+
+  function presentCard() {
+    if (!deck.length) { current = null; renderQuiz(); return; }
+    const card = deck[deckPos];
+    current = { card, options: buildOptions(card), answered: null };
+    renderQuiz();
+  }
+
+  function renderQuiz() {
+    const qEl = document.getElementById("quiz-question");
+    const optsEl = document.getElementById("quiz-options");
+    const fbEl = document.getElementById("quiz-feedback");
     const meta = document.getElementById("card-meta");
     const prog = document.getElementById("card-progress");
-    const grade = document.getElementById("grade-actions");
-    const flipBtn = document.getElementById("flip-btn");
-    const fc = document.getElementById("flashcard");
+    const cardEl = document.getElementById("quiz-card");
 
-    if (!deck.length) {
-      face.innerHTML = `<span class="label">Deck</span>🎉 No cards match this filter — everything here is marked as known. Untick “only cards I don't know” or pick another chapter.`;
+    if (!current) {
+      qEl.innerHTML = `🎉 No questions match this filter — nothing here is marked wrong. Untick “only questions I got wrong” or pick another chapter.`;
+      optsEl.innerHTML = "";
+      fbEl.classList.add("hidden");
       meta.textContent = "";
-      prog.textContent = "0 cards";
-      grade.classList.add("hidden");
-      flipBtn.classList.add("hidden");
-      fc.classList.remove("answer");
+      prog.textContent = "0 questions";
+      cardEl.classList.remove("right", "wrong");
       return;
     }
-    flipBtn.classList.remove("hidden");
-    const card = deck[deckPos];
-    const known = store.cards[card._id] === "know";
-    prog.textContent = `Card ${deckPos + 1} of ${deck.length}` + (known ? " · ✓ marked known" : "");
-    if (showingAnswer) {
-      face.innerHTML = `<span class="label">Answer</span>` + inlineMd(card.a);
-      grade.classList.remove("hidden");
-      fc.classList.add("answer");
-      flipBtn.textContent = "Show question (Space)";
+
+    const card = current.card;
+    const rec = store.cards[card._id];
+    const hist = rec ? ` · overall ✓${rec.c || 0} ✗${rec.w || 0}` : "";
+    const session = (sessionRight + sessionWrong) ? ` · this round ✓${sessionRight} ✗${sessionWrong}` : "";
+    prog.textContent = `Question ${deckPos + 1} of ${deck.length}${session}${hist}`;
+
+    qEl.innerHTML = inlineMd(card.q);
+    optsEl.innerHTML = "";
+    const answered = current.answered !== null;
+    current.options.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.className = "quiz-opt";
+      b.innerHTML = `<span class="key">${"ABCD"[i]}</span><span>${inlineMd(opt.text)}</span>`;
+      if (answered) {
+        b.disabled = true;
+        if (opt.correct) b.classList.add("correct");
+        else if (i === current.answered) b.classList.add("wrong");
+        else b.classList.add("dim");
+      } else {
+        b.addEventListener("click", () => answer(i));
+      }
+      optsEl.appendChild(b);
+    });
+
+    if (answered) {
+      const gotIt = current.options[current.answered].correct;
+      fbEl.textContent = gotIt ? "✓ Correct!" : "✗ Not quite — the correct answer is highlighted.";
+      fbEl.className = gotIt ? "good" : "bad";
+      cardEl.classList.toggle("right", gotIt);
+      cardEl.classList.toggle("wrong", !gotIt);
     } else {
-      face.innerHTML = `<span class="label">Question</span>` + inlineMd(card.q);
-      grade.classList.add("hidden");
-      fc.classList.remove("answer");
-      flipBtn.textContent = "Flip (Space)";
+      fbEl.className = "hidden";
+      cardEl.classList.remove("right", "wrong");
     }
+
     meta.textContent = `Ch ${card._chapter} · §${card.section} · p.${card.page}` + (card.tags && card.tags.length ? " · " + card.tags.join(", ") : "");
+    document.getElementById("next-btn").textContent = answered ? "Next → (Enter)" : "Skip →";
   }
 
-  function flip() { showingAnswer = !showingAnswer; renderCard(); }
-  function next() { if (deck.length) { deckPos = (deckPos + 1) % deck.length; showingAnswer = false; renderCard(); } }
-  function prev() { if (deck.length) { deckPos = (deckPos - 1 + deck.length) % deck.length; showingAnswer = false; renderCard(); } }
-  function grade(known) {
-    if (!deck.length) return;
-    const card = deck[deckPos];
-    store.cards[card._id] = known ? "know" : "learning";
+  function answer(i) {
+    if (!current || current.answered !== null) return;
+    current.answered = i;
+    const gotIt = current.options[i].correct;
+    const rec = store.cards[current.card._id] || { c: 0, w: 0, last: null };
+    if (gotIt) { rec.c = (rec.c || 0) + 1; rec.last = "c"; sessionRight++; }
+    else { rec.w = (rec.w || 0) + 1; rec.last = "w"; sessionWrong++; }
+    store.cards[current.card._id] = rec;
     saveStore();
-    // if filtering unknowns and card became known, remove it from deck
-    if (known && document.getElementById("only-unknown").checked) {
-      deck.splice(deckPos, 1);
-      if (deckPos >= deck.length) deckPos = 0;
-      showingAnswer = false;
-      renderCard();
-    } else {
-      next();
-    }
+    renderQuiz();
   }
 
-  document.getElementById("flip-btn").addEventListener("click", flip);
-  document.getElementById("flashcard").addEventListener("click", flip);
+  function next() {
+    if (!deck.length) return;
+    const onlyWrong = document.getElementById("only-wrong").checked;
+    const cur = deck[deckPos];
+    // in drill mode, a question answered correctly leaves the deck
+    if (onlyWrong && current && current.answered !== null && (store.cards[cur._id] || {}).last === "c") {
+      deck.splice(deckPos, 1);
+      if (!deck.length) { current = null; renderQuiz(); return; }
+      if (deckPos >= deck.length) deckPos = 0;
+    } else {
+      deckPos = (deckPos + 1) % deck.length;
+    }
+    presentCard();
+  }
+  function prev() {
+    if (!deck.length) return;
+    deckPos = (deckPos - 1 + deck.length) % deck.length;
+    presentCard();
+  }
+
   document.getElementById("next-btn").addEventListener("click", next);
   document.getElementById("prev-btn").addEventListener("click", prev);
-  document.getElementById("know-btn").addEventListener("click", () => grade(true));
-  document.getElementById("dont-know-btn").addEventListener("click", () => grade(false));
   document.getElementById("shuffle-btn").addEventListener("click", () => rebuildDeck());
-  document.getElementById("only-unknown").addEventListener("change", () => rebuildDeck());
+  document.getElementById("only-wrong").addEventListener("change", () => rebuildDeck());
   document.getElementById("reset-deck-btn").addEventListener("click", () => {
-    if (!confirm("Clear know/learning marks for all cards in the current filter?")) return;
-    deck.forEach(c => delete store.cards[c._id]);
+    if (!confirm("Clear right/wrong history for all questions in the selected chapters?")) return;
+    ALL_CARDS.filter(c => activeChapters.has(c._chapter)).forEach(c => delete store.cards[c._id]);
     saveStore();
     rebuildDeck(true);
   });
@@ -241,11 +326,14 @@
   document.addEventListener("keydown", e => {
     if (!document.getElementById("tab-cards").classList.contains("active")) return;
     if (e.target.tagName === "INPUT") return;
-    if (e.code === "Space") { e.preventDefault(); flip(); }
+    const answered = current && current.answered !== null;
+    if (/^[1-4]$/.test(e.key) && current && !answered) {
+      const i = +e.key - 1;
+      if (i < current.options.length) answer(i);
+    }
+    else if (e.key === "Enter" || e.code === "Space") { if (answered) { e.preventDefault(); next(); } }
     else if (e.key === "ArrowRight") next();
     else if (e.key === "ArrowLeft") prev();
-    else if (e.key === "1" && showingAnswer) grade(false);
-    else if (e.key === "2" && showingAnswer) grade(true);
   });
 
   // ---------- checklists ----------
@@ -355,18 +443,20 @@
     let html = `<div class="stat-grid">`;
     DATA.forEach(ch => {
       const cards = ALL_CARDS.filter(c => c._chapter === ch.chapter);
-      const known = cards.filter(c => store.cards[c._id] === "know").length;
-      const learning = cards.filter(c => store.cards[c._id] === "learning").length;
-      const pct = cards.length ? Math.round((known / cards.length) * 100) : 0;
+      const right = cards.filter(c => (store.cards[c._id] || {}).last === "c").length;
+      const wrong = cards.filter(c => (store.cards[c._id] || {}).last === "w").length;
+      const pctR = cards.length ? Math.round((right / cards.length) * 100) : 0;
+      const pctW = cards.length ? Math.round((wrong / cards.length) * 100) : 0;
       html += `<div class="stat-card">
         <h3>${ch.chapter <= 5 ? "Ch " + ch.chapter + ": " : ""}${esc(ch.title)}</h3>
-        <div class="bar"><div style="width:${pct}%"></div></div>
-        <div class="stat-num">${known} known · ${learning} still learning · ${cards.length - known - learning} unseen · ${cards.length} total (${pct}%)</div>
+        <div class="bar"><div class="ok" style="width:${pctR}%"></div><div class="bad" style="width:${pctW}%"></div></div>
+        <div class="stat-num">${right} right · ${wrong} wrong · ${cards.length - right - wrong} unseen · ${cards.length} total (${pctR}% right)</div>
       </div>`;
     });
     const total = ALL_CARDS.length;
-    const totalKnown = ALL_CARDS.filter(c => store.cards[c._id] === "know").length;
-    html += `</div><p class="hint" style="margin-top:1rem">Overall: <strong>${totalKnown}/${total}</strong> cards known (${total ? Math.round(totalKnown / total * 100) : 0}%). The test asks 24 questions from anywhere in the book; aim for consistent coverage across every chapter, not just your favourites.</p>`;
+    const totalRight = ALL_CARDS.filter(c => (store.cards[c._id] || {}).last === "c").length;
+    const totalWrong = ALL_CARDS.filter(c => (store.cards[c._id] || {}).last === "w").length;
+    html += `</div><p class="hint" style="margin-top:1rem">Overall (by latest attempt): <strong>${totalRight}/${total}</strong> right (${total ? Math.round(totalRight / total * 100) : 0}%), ${totalWrong} to drill via “only questions I got wrong”. The test asks 24 questions from anywhere in the book; aim for consistent coverage across every chapter, not just your favourites.</p>`;
     wrap.innerHTML = html;
   }
 
